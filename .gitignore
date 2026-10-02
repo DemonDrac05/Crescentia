@@ -1,0 +1,17 @@
+# Unreal generated (rebuilt from source, never commit)
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# IDE
+.vs/
+.idea/
+*.sln
+*.suo
+*.VC.db
+
+# Per-user editor content
+Content/Developers/

@@ -1,43 +1,55 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "NoiseLayer.h"
+#include "Curves/CurveFloat.h"
 #include "WorldGenSettings.generated.h"
 
-// Every parameter shapes a new world. Read only by FarmGenerator
+// Every parameter that shapes a new world. Read only by FarmGenerator
 USTRUCT(BlueprintType)
 struct FWorldGenSettings
 {
 	GENERATED_BODY()
+	
+	// Fills the curves with a sensible default shape.
+	FWorldGenSettings();
 
 	// ----- Seed -----
 	
 	UPROPERTY(EditAnywhere, Category = "Seed")
 	int32 Seed = 12345;
 	
-	// ----- Terrain noise -----
+	// ----- Regions -----
 	
-	UPROPERTY(EditAnywhere, Category = "Terrain|Noise", meta = (ClampMin = "0.001"))
-	float BaseFrequency = 0.05f;
+	// Large, slow shapes: decide where plains, plateaus and mountains are.
+	UPROPERTY(EditAnywhere, Category = "Terrain|Regions")
+	FNoiseLayer RegionNoise;
 	
-	UPROPERTY(EditAnywhere, Category = "Terrain|Noise", meta = (ClampMin = "1", ClampMax = "8"))
-	int32 NumOctaves = 4;
+	// Region value [0,1] -> base height [0,1]
+	// Flat segments become flat land: plains & plateau tops.
+	UPROPERTY(EditAnywhere, Category = "Terrain|Regions")
+	FRuntimeFloatCurve HeightCurve;
 	
-	UPROPERTY(EditAnywhere, Category = "Terrain|Noise", meta = (ClampMin = "0", ClampMax = "1"))
-	float Persistence = 0.5f;
+	// ----- Detail -----
 	
-	UPROPERTY(EditAnywhere, Category = "Terrain|Noise", meta = (ClampMin = "1", ClampMax = "4"))
-	float Lacunarity = 2.0f;
-
+	// Small bumps added on top of the base height.
+	UPROPERTY(EditAnywhere, Category = "Terrain|Detail")
+	FNoiseLayer DetailNoise;
+	
+	// Region value [0,1] -> detail strength there. Near 0 on plains keeps farmland flat.
+	UPROPERTY(EditAnywhere, Category = "Terrain|Detail")
+	FRuntimeFloatCurve DetailAmplitudeCurve;
+	
 	// ----- Threshold (normalized [0,1], compared against raw noise, NOT cm) -----
 	
 	UPROPERTY(EditAnywhere, Category = "Terrain|Threshold", meta = (ClampMin = "0", ClampMax = "0.8"))
-	float SeaLevel = 0.45f;
+	float SeaLevel = 0.22f;
 
 	UPROPERTY(EditAnywhere, Category = "Terrain|Threshold", meta = (ClampMin = "0", ClampMax = "1"))
-	float MountainLevel = 0.7f;
+	float MountainLevel = 0.45f;
 
 	UPROPERTY(EditAnywhere, Category = "Terrain|Threshold", meta = (ClampMin = "0", ClampMax = "1"))
-	float SandBandWidth = 0.05f;
+	float SandBandWidth = 0.04f;
 	
 	// ----- Height -----
 	

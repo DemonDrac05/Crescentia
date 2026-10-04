@@ -25,12 +25,12 @@ namespace
 	{
 		FWorldGenSettings S = In;
 		
-		S.NumOctaves    = FMath::Clamp(S.NumOctaves,	   1,     8);	// 0 -> MaxValue = 0 -> divide by 0
-		S.Persistence   = FMath::Clamp(S.Persistence,	0.0f,  1.0f);	// > 1		-> small details louder than big shapes
-		S.Lacunarity    = FMath::Clamp(S.Lacunarity,	1.0f,  4.0f);	// < 1		-> later octaves get coarser, not finer
-		S.MaxTreeOffset = FMath::Clamp(S.MaxTreeOffset,	0.0f, 0.49f);	// >= 0.5	-> tree leaves its tile
-		S.SeaLevel		= FMath::Clamp(S.SeaLevel,		0.0f,  0.8f);	// > 0.8	-> most of the map ends up underwater
-		S.MountainLevel = FMath::Clamp(S.MountainLevel,	0.0f,  1.0f);
+		S.DetailNoise.NumOctaves    = FMath::Clamp(S.DetailNoise.NumOctaves,	   1,     8);	// 0 -> MaxValue = 0 -> divide by 0
+		S.DetailNoise.Persistence   = FMath::Clamp(S.DetailNoise.Persistence,	0.0f,  1.0f);	// > 1		-> small details louder than big shapes
+		S.DetailNoise.Lacunarity    = FMath::Clamp(S.DetailNoise.Lacunarity,	1.0f,  4.0f);	// < 1		-> later octaves get coarser, not finer
+		S.MaxTreeOffset 			= FMath::Clamp(S.MaxTreeOffset,				0.0f, 0.49f);	// >= 0.5	-> tree leaves its tile
+		S.SeaLevel					= FMath::Clamp(S.SeaLevel,					0.0f,  0.8f);	// > 0.8	-> most of the map ends up underwater
+		S.MountainLevel 			= FMath::Clamp(S.MountainLevel,				0.0f,  1.0f);
 		
 		// FRandRange expects Min <= Max
 		if (S.TreeScaleRange.X > S.TreeScaleRange.Y)
@@ -61,7 +61,7 @@ namespace
 		FRandomStream NoiseRNG = MakeStream(S.Seed, Salt::Noise);
 		
 		TArray<FVector2D> OctaveOffsets;
-		OctaveOffsets.SetNum(S.NumOctaves);
+		OctaveOffsets.SetNum(S.DetailNoise.NumOctaves);
 		
 		for (FVector2D& OctaveOffset : OctaveOffsets)
 		{
@@ -77,10 +77,10 @@ namespace
 	{
 		float Total     = 0.f;
 		float Amplitude = 1.f;
-		float Frequency = S.BaseFrequency;
+		float Frequency = S.DetailNoise.Frequency;
 		float MaxValue  = 0.f;				// sum of all amplitudes, used to bring Total back to [-1, 1]
 
-		for (int32 i = 0; i < S.NumOctaves; i++)
+		for (int32 i = 0; i < S.DetailNoise.NumOctaves; i++)
 		{
 			// Where this tile lands on the noise map: window corner + tile position * step size.
 			const FVector2D P = FVector2D(X, Y) * Frequency + OctaveOffsets[i];
@@ -88,8 +88,8 @@ namespace
 			MaxValue += Amplitude;
 
 			// Each octave: finer details (higher frequency) with less influence (lower amplitude).
-			Amplitude *= S.Persistence;
-			Frequency *= S.Lacunarity;
+			Amplitude *= S.DetailNoise.Persistence;
+			Frequency *= S.DetailNoise.Lacunarity;
 		}
 
 		return (Total / MaxValue) * 0.5f + 0.5f; // [-1, 1] -> [0, 1]

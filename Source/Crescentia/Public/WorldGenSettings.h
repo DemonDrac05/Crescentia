@@ -40,7 +40,7 @@ struct FWorldGenSettings
 	UPROPERTY(EditAnywhere, Category = "Terrain|Detail")
 	FRuntimeFloatCurve DetailAmplitudeCurve;
 	
-	// ----- Threshold (normalized [0,1], compared against raw noise, NOT cm) -----
+	// ----- Threshold (normalized [0,1], compared against the shaped height, NOT cm) -----
 	
 	UPROPERTY(EditAnywhere, Category = "Terrain|Threshold", meta = (ClampMin = "0", ClampMax = "0.8"))
 	float SeaLevel = 0.22f;

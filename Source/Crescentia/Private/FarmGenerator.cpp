@@ -8,8 +8,9 @@ namespace
 	// so adding a new pass (ponds, rivers...) never changes the output of existing passes.	
 	namespace Salt
 	{
-		constexpr uint32 Noise = 0x1001;
-		constexpr uint32 Trees = 0x2002;
+		constexpr uint32 Region = 0x1001;
+		constexpr uint32 Detail = 0x1003;
+		constexpr uint32 Trees  = 0x2002;
 	}
 	
 	// Private, reproducible RNG for one pass. Unlike FMath::FRand() (shared by the whole engine),
@@ -19,15 +20,34 @@ namespace
 		return FRandomStream(static_cast<int32>(HashCombine(GetTypeHash(Seed), SaltValue)));
 	}
 	
+	void ValidateLayer(FNoiseLayer& NoiseLayer)
+	{
+		NoiseLayer.Frequency	 = FMath::Max(NoiseLayer.Frequency, 0.001f);
+		NoiseLayer.NumOctaves    = FMath::Clamp(NoiseLayer.NumOctaves,	   1,     8);	// 0 -> MaxValue = 0 -> divide by 0
+		NoiseLayer.Persistence   = FMath::Clamp(NoiseLayer.Persistence,	0.0f,  1.0f);	// > 1		-> small details louder than big shapes
+		NoiseLayer.Lacunarity    = FMath::Clamp(NoiseLayer.Lacunarity,	1.0f,  4.0f);	// < 1		-> later octaves get coarser, not finer
+	}
+	
 	// Returns a safe COPY of the settings. Editor meta clamps only protect the Details panel.
 	// Values from Blueprints, save files or code can still be invalid, so we guard here.
 	FWorldGenSettings Validate(const FWorldGenSettings& In)
 	{
 		FWorldGenSettings S = In;
 		
-		S.DetailNoise.NumOctaves    = FMath::Clamp(S.DetailNoise.NumOctaves,	   1,     8);	// 0 -> MaxValue = 0 -> divide by 0
-		S.DetailNoise.Persistence   = FMath::Clamp(S.DetailNoise.Persistence,	0.0f,  1.0f);	// > 1		-> small details louder than big shapes
-		S.DetailNoise.Lacunarity    = FMath::Clamp(S.DetailNoise.Lacunarity,	1.0f,  4.0f);	// < 1		-> later octaves get coarser, not finer
+		ValidateLayer(S.RegionNoise);
+		ValidateLayer(S.DetailNoise);
+		
+		if (S.HeightCurve.GetRichCurveConst()->GetNumKeys() == 0)
+		{
+			UE_LOG(LogFarm, Warning, TEXT("HeightCurve is empty, using a straight line."));
+			
+			const FKeyHandle KeyHandle1 = S.HeightCurve.GetRichCurve()->AddKey(0,0);
+			const FKeyHandle KeyHandle2 = S.HeightCurve.GetRichCurve()->AddKey(1,1);
+			
+			S.HeightCurve.GetRichCurve()->SetKeyInterpMode(KeyHandle1, RCIM_Linear);
+			S.HeightCurve.GetRichCurve()->SetKeyInterpMode(KeyHandle2, RCIM_Linear);
+		}
+		
 		S.MaxTreeOffset 			= FMath::Clamp(S.MaxTreeOffset,				0.0f, 0.49f);	// >= 0.5	-> tree leaves its tile
 		S.SeaLevel					= FMath::Clamp(S.SeaLevel,					0.0f,  0.8f);	// > 0.8	-> most of the map ends up underwater
 		S.MountainLevel 			= FMath::Clamp(S.MountainLevel,				0.0f,  1.0f);
@@ -53,15 +73,16 @@ namespace
 		return S;
 	}
 	
+	
 	// Picks where each octave's window sits on the noise map. The seed decides position,
 	// so a different seed shows a different part of the same infinite map.
 	// Range is [0,256) because PerlinNoise2D repeats every 256 units.
-	TArray<FVector2D> BuildOctaveOffsets(const FWorldGenSettings& S)
+	TArray<FVector2D> BuildOctaveOffsets(const FNoiseLayer& NoiseLayer, int32 Seed, uint32 SaltValue)
 	{
-		FRandomStream NoiseRNG = MakeStream(S.Seed, Salt::Noise);
+		FRandomStream NoiseRNG = MakeStream(Seed, SaltValue);
 		
 		TArray<FVector2D> OctaveOffsets;
-		OctaveOffsets.SetNum(S.DetailNoise.NumOctaves);
+		OctaveOffsets.SetNum(NoiseLayer.NumOctaves);
 		
 		for (FVector2D& OctaveOffset : OctaveOffsets)
 		{
@@ -72,15 +93,15 @@ namespace
 	}
 	
 	// Fractal noise (fBm): stacks octaves from big shapes to small details.
-	// Returns a normalized value in [0, 1], used only for thresholds, never stored.
-	float SampleNoise01(int32 X, int32 Y, const FWorldGenSettings& S, const TArray<FVector2D>& OctaveOffsets)
+	// Returns a normalized value in [0, 1]
+	float SampleFbm01(int32 X, int32 Y, const FNoiseLayer& NoiseLayer, const TArray<FVector2D>& OctaveOffsets)
 	{
 		float Total     = 0.f;
 		float Amplitude = 1.f;
-		float Frequency = S.DetailNoise.Frequency;
+		float Frequency = NoiseLayer.Frequency;
 		float MaxValue  = 0.f;				// sum of all amplitudes, used to bring Total back to [-1, 1]
 
-		for (int32 i = 0; i < S.DetailNoise.NumOctaves; i++)
+		for (int32 i = 0; i < NoiseLayer.NumOctaves; i++)
 		{
 			// Where this tile lands on the noise map: window corner + tile position * step size.
 			const FVector2D P = FVector2D(X, Y) * Frequency + OctaveOffsets[i];
@@ -88,31 +109,40 @@ namespace
 			MaxValue += Amplitude;
 
 			// Each octave: finer details (higher frequency) with less influence (lower amplitude).
-			Amplitude *= S.DetailNoise.Persistence;
-			Frequency *= S.DetailNoise.Lacunarity;
+			Amplitude *= NoiseLayer.Persistence;
+			Frequency *= NoiseLayer.Lacunarity;
 		}
 
 		return (Total / MaxValue) * 0.5f + 0.5f; // [-1, 1] -> [0, 1]
 	}
 	
-	// Classifies each tile from normalized noise, then bakes its height into cm,
-	// so saved worlds never depends on HeightScale.
+	// Region noise picks the land, curves turn it into height, detail adds region-dependent bumps.
 	void GenerateTerrain(const FWorldGenSettings& S, UFarmGrid& World)
 	{
-		const TArray<FVector2D> OctaveOffsets = BuildOctaveOffsets(S);
+		const TArray<FVector2D> RegionOffsets = BuildOctaveOffsets(S.RegionNoise, S.Seed, Salt::Region);
+		const TArray<FVector2D> DetailOffsets = BuildOctaveOffsets(S.DetailNoise, S.Seed, Salt::Detail);
+		
+		const FRichCurve* HeightCurve	 = S.HeightCurve.GetRichCurveConst();
+		const FRichCurve* AmplitudeCurve = S.DetailAmplitudeCurve.GetRichCurveConst();
 		
 		for (int32 Y = 0; Y < UFarmGrid::Height; Y++)
 		{
 			for (int32 X = 0; X < UFarmGrid::Width; X++)
 			{
-				const float N = SampleNoise01(X, Y, S, OctaveOffsets);
+				const float Region = SampleFbm01(X, Y, S.RegionNoise, RegionOffsets);
+				const float Base   = HeightCurve->Eval(Region);
+				
+				const float Bump	  = SampleFbm01(X, Y, S.DetailNoise, DetailOffsets) * 2.f - 1.f;
+				const float Amplitude = AmplitudeCurve->Eval(Region);
+				const float H01		  = FMath::Clamp(Base + Bump * Amplitude, 0.f, 1.f);
+				
 				FTileData& Tile = World.GetTile(X, Y);
-				Tile.Height = N * S.HeightScale;
+				Tile.Height = H01 * S.HeightScale;
 					
-				if (N < S.SeaLevel)							Tile.Type = ETileType::Water;
-				else if (N < S.SeaLevel + S.SandBandWidth)	Tile.Type = ETileType::Sand;
-				else if (N > S.MountainLevel)				Tile.Type = ETileType::Highland;
-				else										Tile.Type = ETileType::Grassland;
+				if (H01 < S.SeaLevel)							Tile.Type = ETileType::Water;
+				else if (H01 < S.SeaLevel + S.SandBandWidth)	Tile.Type = ETileType::Sand;
+				else if (H01 > S.MountainLevel)					Tile.Type = ETileType::Highland;
+				else											Tile.Type = ETileType::Grassland;
 			}
 		}
 		

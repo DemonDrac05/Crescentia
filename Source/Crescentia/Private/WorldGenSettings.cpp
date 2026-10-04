@@ -2,7 +2,7 @@
 
 FWorldGenSettings::FWorldGenSettings()
 {
-	RegionNoise.Frequency  = 0.008f;	// one region spans	roughly 100+ tiles
+	RegionNoise.Frequency  = 0.008f;	// one region spans roughly 100+ tiles
 	RegionNoise.NumOctaves = 2;			// region should be smooth, not detailed
 	
 	DetailNoise.Frequency  = 0.08f;

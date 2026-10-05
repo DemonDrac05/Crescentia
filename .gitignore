@@ -10,6 +10,7 @@ Plugins/**/Intermediate/
 .vs/
 .idea/
 *.sln
+*.slnx
 *.suo
 *.VC.db
 
